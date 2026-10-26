@@ -1,0 +1,369 @@
+FIREWALL configuration
+==========================
+
+ciscoasa#configure t
+ciscoasa#configure terminal 
+ciscoasa(config)# no dhcpd address 192.168.1.5-192.168.1.36 inside
+ciscoasa(config)#do show running-config
+
+set inside and outside on asa
+==============================
+
+ciscoasa#configure t
+ciscoasa(config)#int vlan 1
+ciscoasa(config-if)#ip address 10.1.1.1 255.0.0.0
+ciscoasa(config-if)#nameif inside
+ciscoasa(config-if)#security-level 100
+ciscoasa(config-if)#int et0/0
+ciscoasa(config-if)#switchport access vlan 1
+ciscoasa(config-if)#
+
+ciscoasa(config-if)#exit
+ciscoasa(config)#int VLAN 2
+ciscoasa(config-if)#ip address 50.1.1.2 255.0.0.0
+ciscoasa(config-if)#no shutdown 
+ciscoasa(config-if)#nameif outside
+ciscoasa(config-if)#security-level 0
+ciscoasa(config-if)# int et0/1
+ciscoasa(config-if)#switchport access vlan 2
+
+configure dhcp on asa
+=======================
+
+ciscoasa(config)#dhcpd address 10.1.1.10-10.1.1.30 inside 
+ciscoasa(config)#dhcpd dns 8.8.8.8 INterface inside
+ ciscoasa(config)#dhcpd enable inside
+
+default route on asa
+=====================
+ciscoasa(config)#route outside 0.0.0.0 0.0.0.0 50.1.1.1
+
+create on object network and enable nat on asa
+===============================================
+
+ciscoasa(config)#object network ?
+
+configure mode commands/options:
+WORD Specifies object ID (1-64 characters)
+ciscoasa(config)#object network LAN
+ciscoasa(config-network-object)#sub
+ciscoasa(config-network-object)#subnet 10.0.0.0 255.0.0.0
+ciscoasa(config-network-object)# nat (inside,outside) dynamic interface 
+ciscoasa(config)#exit
+ciscoasa#write memory 
+
+create acl on asa
+==================
+
+ciscoasa#configure terminal 
+ciscoasa(config)#access-list ofi extended permit tcp any any 
+ciscoasa(config)#access-list ofi extended permit icmp any any
+ciscoasa(config)#access-group ofi in interface outside 
+ciscoasa(config)#exit
+
+configure ssh on ASA 
+=====================
+configure terminal
+
+
+username admin password cisco123 privilege 15
+domain-name lab.local
+crypto key generate rsa modulus 1024
+ssh version 2
+ssh 15.0.0.0 255.0.0.0 inside
+ssh timeout 10
+
+write memory
+
+Router side (code)
+==================
+Router>
+Router>en
+Router#configure t
+Router#configure terminal 
+Enter configuration commands, one per line. End with CNTL/Z.
+Router(config)#int fa0/0
+Router(config-if)#ip address 50.1.1.1 255.0.0.0
+Router(config-if)#no shutdown 
+
+Router(config-if)#
+
+
+Router(config-if)#exit
+Router(config)#int
+Router(config)#interface fa0/1
+Router(config-if)#ip address 8.8.8.1 255.0.0.0
+Router(config-if)# no sh
+Router(config-if)# no shutdown 
+
+Configure the DMZ interface VLAN 3 on the ASA.
+==============================================
+interface vlan 3
+ip address 192.168.2.1 255.255.255.0
+no forward interface vlan 1
+nameif dmz
+security-level 70
+
+ Assign ASA physical interface E0/2 to DMZ VLAN 3 and enable the interface.
+===========================================================================
+
+interface Ethernet0/2
+switchport access vlan 3
+
+Configure static NAT to the DMZ server using a network object.
+==============================================================
+object network dmz-server
+host 192.168.2.3
+nat (dmz,outside) static 209.165.200.227
+exit
+
+Configure an ACL to allow access to the DMZ server from the Internet.
+=====================================================================
+access-list OUTSIDE-DMZ permit icmp any host 192.168.2.3
+access-list OUTSIDE-DMZ permit tcp any host 192.168.2.3 eq 80
+access-group OUTSIDE-DMZ in interface outside
+
+
+Router(config-if)#end
+
+Router>enable 
+Router#configure terminal 
+Enter configuration commands, one per line. End with CNTL/Z.
+Router(config)#router ospf ?
+<1-65535> Process ID
+Router(config)#router ospf 1
+Router(config-router)#network 50.0.0.0 0.255.255.255 area 0
+Router(config-router)#network 8.0.0.0 0.255.255.255 area 0
+Router(config-router)# do wr
+Building configuration...
+[OK]
+Router(config-router)#
+
+
+VPN CONFIGURATION(SITE-SITE VPN)
+================================
+
+parameter           value
+==============================
+
+policy number            10
+
+encryption               aes 256
+
+hash                      sha
+authentication            pre-shared key
+group                      2
+lifetime                    86400
+pre-shared key               ciscokey123
+transform-set                   vpn-set
+crypto-map                        vpn-map
+===============================================
+topology
+                   hq
+
+          se0/1/0(10.10.10.2/30)                     se0/0/1(20.20.20.2/30)
+        site1
+           192.168.10.0/24                                        site2
+                                                         192.168.20.0/24
+1.first of all routing and make sure that all site are pinging each other.
+
+Configure ISAKMP to establish IKE (Phase 1)
+==============================================
+site1
+
+crypto isakmp policy 10
+encryption aes 256
+hash sha
+authentication pre-share
+group 2
+lifetime 86400
+exit
+crypto isakmp key CISCOKEY123 address 20.20.20.2
+end
+
+site2
+
+configure terminal
+crypto isakmp policy 10
+encryption aes 256
+hash sha
+authentication pre-share
+group 2
+lifetime 86400
+exit
+crypto isakmp key CISCOKEY123 address 10.10.10.2
+end
+
+ Define the IPsec transform set (Phase 2)
+=========================================
+
+Routers configured: SITE1, SITE2. The command is identical on both routers.
+
+configure terminal
+crypto ipsec transform-set VPN-SET esp-aes 256 esp-sha-hmac
+end
+
+ Create the access list
+=========================
+Routers configured: SITE1, SITE2. The access list selects the traffic to protect and must be a mirror image
+on the two routers.
+
+SITE1
+
+configure terminal
+access-list 110 permit ip 192.168.10.0 0.0.0.255 192.168.20.0 0.0.0.255
+end
+
+SITE2
+
+configure terminal
+access-list 110 permit ip 192.168.20.0 0.0.0.255 192.168.10.0 0.0.0.255
+end
+
+ Create the crypto map for IPsec
+==============================
+Routers configured: SITE1, SITE2.
+
+SITE1
+
+configure terminal
+crypto map VPN-MAP 10 ipsec-isakmp
+set peer 20.20.20.2
+set transform-set VPN-SET
+match address 110
+exit
+end
+
+SITE2
+
+configure terminal
+crypto map VPN-MAP 10 ipsec-isakmp
+set peer 10.10.10.2
+set transform-set VPN-SET
+match address 110
+exit
+end
+
+ Apply the crypto map to the outgoing interface
+===================================================
+Routers configured: SITE1, SITE2. The map is applied to the serial interface that faces the ISP.
+
+SITE1 and SITE2 (same commands)
+
+site1
+
+configure terminal
+interface serial 0/1/0
+crypto map VPN-MAP
+exit
+end
+write memory
+
+site2
+ 
+configure terminal
+interface serial 0/0/1
+crypto map VPN-MAP
+exit
+end
+write memory
+
+
+ Verification
+===============
+1.ping every pc each others ,ping successful  it was correct
+
+2.Then run these on SITE1 and on SITE2:
+
+show crypto isakmp sa
+show crypto ipsec sa
+show crypto map
+show access-lists
+show running-config
+
+    AAA configuration
+   ===================
+Router#configure terminal 
+Enter configuration commands, one per line. End with CNTL/Z.
+Router(config)#en
+Router(config)#enable p
+Router(config)#enable password ict
+Router(config)#host
+Router(config)#hostname nam
+Router(config)#hostname R1
+R1(config)#ip domain-name local.com
+R1(config)#crypto key generate rsa
+R1(config)#crypto key generate rsa 
+
+How many bits in the modulus [512]: 1024
+% Generating 1024 bit RSA keys, keys will be non-exportable...[OK]
+
+R1(config)#username joseph password joseph123
+*Mar 1 0:5:34.708: %SSH-5-ENABLED: SSH 1.99 has been enabled
+R1(config)#aaa n
+R1(config)#aaa new-model 
+R1(config)#aaa authentication login default local
+R1(config)#aaa authentication login default local
+R1(config)#line vty 0 4
+R1(config-line)#login authentication default 
+R1(config-line)#transport input ssh 
+R1(config-line)#do wr
+Building configuration...
+[OK]
+
+SERVER BASED AUTHENTICATION
+===========================
+
+R1(config)#
+R1(config)#tacacs-server host 192.168.30.3
+R1(config)#ta
+R1(config)#tacacs-server k
+R1(config)#tacacs-server key joseph123
+R1(config)#aaa new-model 
+R1(config)#aaa authentication login default group tacacs+ local
+
+R1(config)#line vty 0 4
+R1(config-line)#login authentication default 
+R1(config-line)#transport input ssh
+R1(config-line)#exit
+R1(config)#
+R1(config)#line console 0
+R1(config-line)#login authentication default 
+R1(config-line)#do wr
+Building configuration...
+[OK]
+R1(config-line)#
+
+configure local aaa on router r1 using local database
+====================================================== 
+enable
+configure terminal
+
+aaa new-model
+
+username admin privilege 15 secret Admin@123
+
+aaa authentication login CONSOLE-LOGIN local
+aaa authentication login VTY-LOGIN local
+
+line console 0
+ login authentication CONSOLE-LOGIN
+ exit
+
+line vty 0 4
+ login authentication VTY-LOGIN
+ transport input telnet ssh
+ exit
+
+end
+write memory
+
+
+
+
+
+
+
+
+
+
